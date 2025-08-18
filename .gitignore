@@ -1,0 +1,7 @@
+# 学習済みモデル
+/gemma-finetuned
+
+# トレーニングデータ
+recipe_data.jsonl
+recipe_data_train.jsonl
+recipe_data_validation.jsonl
