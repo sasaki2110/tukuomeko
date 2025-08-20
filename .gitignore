@@ -5,6 +5,9 @@
 recipe_data.jsonl
 recipe_data_train.jsonl
 recipe_data_validation.jsonl
+new_recipe_data.jsonl
+new_recipe_data_train.jsonl
+new_recipe_data_validation.jsonl
 
 # FastAPIのキャッシュ
 __pycache__
