@@ -2,6 +2,9 @@ import random
 import json
 
 # ファイルパス
+#input_file = "new_recipe_data.jsonl"
+#train_file = "new_recipe_data_train.jsonl"
+#validation_file = "new_recipe_data_validation.jsonl"
 input_file = "recipe_data.jsonl"
 train_file = "recipe_data_train.jsonl"
 validation_file = "recipe_data_validation.jsonl"

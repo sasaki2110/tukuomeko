@@ -1,27 +1,25 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, DataCollatorForLanguageModeling
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel # PeftModelをインポート
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import BitsAndBytesConfig
 import os
 
 # Hugging Faceのキャッシュディレクトリを設定 (任意: デフォルトはユーザーのホームディレクトリ)
 # os.environ['HF_HOME'] = '/app/hf_cache'
 
-# --- 1. モデルとトークナイザーのロード ---
-# ベースモデルのID (Gemma 2B Instruction-tuned)
-base_model_id = "google/gemma-2b-it"
-# 前回学習したLoRAアダプターが保存されているディレクトリのパス
-# 前回の学習スクリプトで `trainer.save_model("./gemma-finetuned")` と保存した場合、このパスになります。
-pretrained_lora_path = "./gemma-finetuned"
+# 1. モデルとトークナイザーのロード
+# Gemma 2B base モデルID
+model_id = "google/gemma-2b"
 
-# トークナイザーのロード (ベースモデルからロード)
-tokenizer = AutoTokenizer.from_pretrained(base_model_id)
+# トークナイザーのロード
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 # パディングトークンがないモデルの場合に設定
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token # EOSトークンをパディングトークンとして設定
 
-# 4-bit 量子化設定 (前回と同じ設定を再適用)
+# 4-bit 量子化設定 (8GB VRAM RTX 3060 Tiに推奨)
+# bfloat16での計算を有効にし、メモリ効率を高める
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4", # NormalFloat 4-bit 量子化タイプ
@@ -29,61 +27,50 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_compute_dtype=torch.bfloat16, # 計算時のデータ型
 )
 
-# ベースモデルを量子化設定でロード
-# これにより、Gemma 2B ITの基本構造がロードされ、量子化が適用されます。
+# モデルのロード
+# device_map="auto" で利用可能なGPUに自動的にモデルを配置
 model = AutoModelForCausalLM.from_pretrained(
-    base_model_id,
+    model_id,
     quantization_config=bnb_config,
     device_map="auto",
     torch_dtype=torch.bfloat16 # モデルのロード時のデータ型 (量子化と合わせてbf16推奨)
 )
 
-# --- 2. LoRAアダプターのロードとモデルの準備 ---
-# 量子化されたベースモデルをLoRAトレーニング用に準備します。
-# これにより、PEFTモジュールが有効になり、アダプターが結合できるようになります。
+# 2. モデルの準備 (LoRA)
+# 量子化されたモデルをLoRAトレーニング用に準備
 model = prepare_model_for_kbit_training(model)
 
-# 以前にファインチューニングしたLoRAアダプターをロードします。
-# これにより、ロードしたベースモデルの上に以前のLoRA重みが適用されます。
-# これが追加学習の肝となります。
-model = PeftModel.from_pretrained(model, pretrained_lora_path)
-
-# LoRA設定 (既存のアダプターを継続して学習するため、この設定は主に情報として残しますが、
-# 既存のアダプターのR, alphaなどはロード時に自動で引き継がれます。)
+# LoRA設定
 lora_config = LoraConfig(
-    r=8,
-    lora_alpha=16,
+    r=8, # LoRAのランク (通常8, 16, 32, 64)
+    lora_alpha=16, # LoRAのスケーリング係数 (通常rの2倍)
+    # LoRAを適用するターゲットモジュール (Gemmaの場合、Attentionのprojection層が一般的)
     target_modules=["q_proj", "v_proj", "o_proj", "k_proj", "gate_proj", "up_proj", "down_proj"],
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM",
+    lora_dropout=0.05, # ドロップアウト率
+    bias="none", # バイアスの学習設定
+    task_type="CAUSAL_LM", # タスクタイプ (因果言語モデリング)
 )
-# 注意: PeftModel.from_pretrainedで既にアダプターをロードしているため、
-# get_peft_modelを再度呼び出す必要はありません。モデルは既にPeftModelインスタンスです。
+# モデルにLoRAアダプターを追加
+model = get_peft_model(model, lora_config)
 
-# LoRAが適用されたモデルの訓練可能なパラメータ数を表示
-# 追加学習でも、LoRAアダプターのパラメータのみが学習対象となります。
+# LoRAが適用されたモデルのパラメータ数を表示
 model.print_trainable_parameters()
 
 
-# --- 3. 新しいデータセットのロード ---
-# ここに**新しい学習データと検証データ**のパスを指定してください。
-# 例として、ファイル名を変更しています。必要に応じて実際のパスに変更してください。
-new_train_data_path = "/app/data/new_recipe_data_train.jsonl"
-new_validation_data_path = "/app/data/new_recipe_data_validation.jsonl"
-
+# 3. データセットのロード
+# 訓練データと検証データをそれぞれロード
 dataset = load_dataset(
     "json",
     data_files={
-        "train": new_train_data_path,
-        "validation": new_validation_data_path
+        "train": "/app/data/tukuomeko/recipe_data_train.jsonl",
+        "validation": "/app/data/tukuomeko/recipe_data_validation.jsonl"
     }
 )
 
-# --- 4. データの前処理 (以前のスクリプトから変更なし) ---
+# 4. データの前処理 (推奨される修正版)
 def tokenize_function(examples):
     # トークン化の最大長を設定
-    max_length = 512 
+    max_length = 512
 
     # プロンプトと回答を分離
     # " [回答]\n" が存在しないデータはエラーになるので、データ形式を統一しておくことが重要
@@ -140,18 +127,21 @@ tokenized_dataset = dataset.map(
     desc="Tokenizing and masking data" # 処理の進捗バーに表示される説明
 )
 
-# --- 5. 学習設定 (TrainingArguments) ---
-# 追加学習のため、設定を調整します。
+# `group_texts` 関数を削除しました。
+# 各サンプルがtokenize_function内で適切な長さにパディングされるため、このステップは不要です。
+
+
+# 5. 学習設定
 training_args = TrainingArguments(
-    output_dir="./gemma-finetuned-continued", # 新しい追加学習モデルの保存先ディレクトリ
+    output_dir="./gemma-finetuned-new", # 学習済みモデルの保存先ディレクトリ
     overwrite_output_dir=True, # 既に存在する場合は上書き
-    num_train_epochs=5, # 学習エポック数 (新しいデータの量に合わせて調整してください)
+    num_train_epochs=3, # 学習エポック数
     per_device_train_batch_size=1, # GPUあたりのバッチサイズ (8GB VRAMでは1が安全)
     gradient_accumulation_steps=4, # 勾配蓄積ステップ数 (実質バッチサイズ: 1 * 4 = 4)
-    learning_rate=1e-5, # **重要**: 追加学習では、通常、初期学習よりも小さい学習率に設定します。
-    fp16=False, # bf16を既に設定しているので、ここではfp16=False
-    bf16=True, # bfloat16を使用
-    logging_dir='./logs_continued', # ログの保存先ディレクトリも新しいものにすると良いでしょう
+    learning_rate=2e-4, # 学習率
+    fp16=False, # bf16を既に設定しているので、ここではfp16=False (もしbf16が使えない場合はfp16=True)
+    bf16=True, # bfloat16を使用 (RTX 30系では対応。非対応の場合はfp16=Trueに変更)
+    logging_dir='./logs', # ログの保存先ディレクトリ
     logging_steps=10, # ログ出力の頻度
     eval_strategy="epoch", # 各エポック終了ごとに検証を実行
     save_strategy="epoch", # 評価戦略と保存戦略を一致させる
@@ -161,7 +151,7 @@ training_args = TrainingArguments(
     report_to="none" # ログ報告先 (wandb, tensorboardなど、今回はなし)
 )
 
-# --- 6. Trainerの初期化と学習の開始 ---
+# 6. Trainerの初期化と学習の開始
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -172,11 +162,11 @@ trainer = Trainer(
 
 # 'use_cache=True' is incompatible with gradient checkpointing. Setting 'use_cache=False'.
 # の警告を回避するため、Trainer初期化後にuse_cacheを明示的にFalseに設定
+# (この警告は一般的に問題ないですが、気になる場合に)
 model.config.use_cache = False
 
 trainer.train()
 
-# --- 7. モデルの保存 ---
+# 7. モデルの保存
 # 学習済みモデルを保存
-# 追加学習後のモデルを新しいディレクトリに保存することを推奨します。
-trainer.save_model("./gemma-finetuned-continued")
+trainer.save_model("./gemma-finetuned-base")

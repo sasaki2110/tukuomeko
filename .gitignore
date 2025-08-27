@@ -1,5 +1,10 @@
 # 学習済みモデル
 /gemma-finetuned
+/gemma-finetuned-continued
+/gemma-finetuned-new
+/gemma-finetuned-new-continued
+/gemma-finetuned-base
+/gemma-finetuned-base-continued
 
 # トレーニングデータ
 recipe_data.jsonl

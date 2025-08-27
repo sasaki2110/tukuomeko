@@ -32,7 +32,8 @@ async def load_model():
     global tokenizer, model
     try:
         model_id = "google/gemma-2b-it"
-        lora_adapter_path = "./gemma-finetuned" # LoRAアダプターのパス
+        #lora_adapter_path = "./gemma-finetuned" # LoRAアダプターのパス
+        lora_adapter_path = "./gemma-finetuned-new-continued" # LoRAアダプターのパス
 
         print(f"モデル '{model_id}' とトークナイザーをロード中...")
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -53,6 +54,7 @@ async def load_model():
         model = PeftModel.from_pretrained(model, lora_adapter_path)
         model.eval() # モデルを評価モードに設定
         print("モデルとLoRAアダプターのロードが完了しました。")
+        print(model)
 
     except Exception as e:
         print(f"モデルのロード中にエラーが発生しました: {e}", file=sys.stderr)
@@ -76,6 +78,10 @@ async def generate_response_api(request: Request):
         #full_prompt = prompt_text + "[回答]\n"
         full_prompt = prompt_text
         
+        # デバッグ用ログ
+        #print("--------------------------------")
+        #print(f"受け取ったプロンプト: {full_prompt}")
+
         # プロンプトをトークン化
         inputs = tokenizer(
             full_prompt,
@@ -103,9 +109,13 @@ async def generate_response_api(request: Request):
         # 入力プロンプト部分を除外してデコード
         response_tokens = outputs[0][len(inputs["input_ids"][0]):]
         full_response = tokenizer.decode(response_tokens, skip_special_tokens=True)
-        
-        # 応答の最初の行のみを返却
-        first_line_response = full_response.split('\n')[0].strip()
+
+        # デバッグ用ログ
+        #print("--------------------------------")
+        #print(f"生成された応答: {full_response}")
+
+        # 応答の最初の行のみを返却 eosトークンを削除
+        first_line_response = full_response.split('\n')[0].strip().replace('</s>', '')
 
         return JSONResponse(content={"response": first_line_response})
 
