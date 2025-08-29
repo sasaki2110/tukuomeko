@@ -13,6 +13,7 @@ model_base = AutoModelForCausalLM.from_pretrained(base_model_id, quantization_co
 #finetuned_dir = "./gemma-finetuned"
 finetuned_dir = "./gemma-finetuned-new-continued"
 #finetuned_dir = "./gemma-finetuned-new"
+#finetuned_dir = "./gemma-finetuned-base"
 model = PeftModel.from_pretrained(model_base, finetuned_dir)
 model.eval()
 model.config.use_cache = True
