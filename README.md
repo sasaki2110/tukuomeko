@@ -21,7 +21,6 @@ new_train3.py               it 系モデルでのLoRa追加学習（eos あり�
 split_data.py               学習データを訓練用と検証用に分割
 train.py                    it 系モデルでのLoRa初期学習（eos 無し　注）
 train3.py                   it 系モデルでのLoRa初期学習（eos 無し　注）
-scrape_cookai.py            解析&insert文作成
 
 注：eos の有無は学習データの問題の為、実際のロジックは同じ
 　　出力するLoRA学習結果の出力フォルダが違うだけ。
