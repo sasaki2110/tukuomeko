@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  tukuome3v2:
+    image: node:latest
+    container_name: tukuome3v2
+    ports:
+      - "3030:3000"
+    networks:
+      - tukuome-network
+
+    # 永続実行を維持するためのコマンド
+    command: sleep infinity 
+
+  tukuomeko:
+    image: nvidia/cuda:12.1.1-devel-ubuntu22.04
+    container_name: tukuomeko
+    ports:
+      - "8080:8000"
+    volumes:
+      - C:\Users\user\Documents\tmp:/app/data
+    networks:
+      - tukuome-network
+      
+    # 永続実行を維持するためのコマンド
+    command: sleep infinity 
+    
+    # NVIDIA RTX 3060 Ti を利用するための設定
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+# ネットワーク定義（自動作成されます）
+networks:
+  tukuome-network:
+    driver: bridge
