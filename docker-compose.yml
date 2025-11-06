@@ -5,7 +5,7 @@ services:
     image: node:latest
     container_name: tukuome3v2
     ports:
-      - "3030:3000"
+      - "3030:3030"
     networks:
       - tukuome-network
 
@@ -16,7 +16,7 @@ services:
     image: nvidia/cuda:12.1.1-devel-ubuntu22.04
     container_name: tukuomeko
     ports:
-      - "8080:8000"
+      - "8000:8000"
     volumes:
       - C:\Users\user\Documents\tmp:/app/data
     networks:
