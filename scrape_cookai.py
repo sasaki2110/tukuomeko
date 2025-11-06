@@ -127,12 +127,62 @@ class CookAIScraper:
             full_url = urljoin(base_url, href)
             
             # カテゴリページのURLパターン: /category/...
-            if '/category/' in href and 'cookai-recipe.com' in full_url:
+            # より柔軟に検索（相対パスと絶対パスの両方に対応）
+            if '/category/' in href:
                 # ページネーションURLは除外
                 if '/page/' not in href:
-                    category_urls.add(full_url)
+                    # cookai-recipe.comが含まれているか、または相対パスの場合
+                    if 'cookai-recipe.com' in full_url or href.startswith('/category/'):
+                        category_urls.add(full_url)
         
         return category_urls
+    
+    def get_tag_urls(self, base_url: str = "https://cookai-recipe.com", category_urls: Set[str] = None) -> Set[str]:
+        """
+        タグページのURLを取得
+        
+        Args:
+            base_url: ベースURL（デフォルトはトップページ）
+            category_urls: カテゴリURLのセット（指定された場合、カテゴリページからもタグを取得）
+            
+        Returns:
+            タグページのURLセット
+        """
+        tag_urls = set()
+        
+        # トップページからタグを取得
+        soup, _ = self.get_page(base_url)
+        if soup:
+            all_links = soup.find_all('a', href=True)
+            
+            for link in all_links:
+                href = link.get('href', '')
+                full_url = urljoin(base_url, href)
+                
+                # タグページのURLパターン: /tag/...
+                if '/tag/' in href:
+                    # ページネーションURLは除外
+                    if '/page/' not in href:
+                        # cookai-recipe.comが含まれているか、または相対パスの場合
+                        if 'cookai-recipe.com' in full_url or href.startswith('/tag/'):
+                            tag_urls.add(full_url)
+        
+        # カテゴリページからもタグを取得（オプション）
+        if category_urls:
+            print(f"  カテゴリページからタグを取得中...")
+            for cat_url in list(category_urls)[:5]:  # 最初の5つのカテゴリページから取得
+                cat_soup, _ = self.get_page(cat_url)
+                if cat_soup:
+                    cat_links = cat_soup.find_all('a', href=True)
+                    for link in cat_links:
+                        href = link.get('href', '')
+                        full_url = urljoin(cat_url, href)
+                        
+                        if '/tag/' in href and '/page/' not in href:
+                            if 'cookai-recipe.com' in full_url or href.startswith('/tag/'):
+                                tag_urls.add(full_url)
+        
+        return tag_urls
     
     def get_cookpad_urls_from_article(self, article_url: str) -> Set[str]:
         """記事ページからCookpadリンクを取得"""
@@ -394,6 +444,74 @@ class CookAIScraper:
         
         return self.results
     
+    def scrape_tag(self, tag_url: str, max_pages: int = 10):
+        """
+        タグページを再帰的にスクレイピング
+        
+        Args:
+            tag_url: タグページのURL
+            max_pages: 最大ページ数（ページネーション）
+        """
+        print(f"\n{'='*60}")
+        print(f"タグページをスクレイピング開始: {tag_url}")
+        print(f"{'='*60}")
+        
+        # ページネーションURLを取得
+        pagination_urls = self.get_pagination_urls(tag_url)
+        all_tag_urls = {tag_url} | pagination_urls
+        
+        # 最大ページ数に制限
+        tag_urls_list = list(all_tag_urls)[:max_pages]
+        print(f"処理するタグページ数: {len(tag_urls_list)}")
+        
+        # 各タグページから記事URLを取得
+        all_article_urls = set()
+        for tg_url in tag_urls_list:
+            article_urls = self.get_article_urls_from_category(tg_url)
+            all_article_urls.update(article_urls)
+            print(f"  {tg_url}: {len(article_urls)}件の記事が見つかりました")
+        
+        print(f"\n合計記事数: {len(all_article_urls)}")
+        
+        # 訪問済みの記事URLを除外
+        unvisited_article_urls = all_article_urls - self.visited_article_urls
+        skipped_count = len(all_article_urls) - len(unvisited_article_urls)
+        if skipped_count > 0:
+            print(f"訪問済み記事数（スキップ）: {skipped_count}")
+        print(f"処理対象記事数: {len(unvisited_article_urls)}")
+        
+        # 各記事ページからCookpadリンクを取得
+        print(f"\n記事ページからCookpadリンクを取得中...")
+        for i, article_url in enumerate(unvisited_article_urls, 1):
+            print(f"  [{i}/{len(unvisited_article_urls)}] {article_url}")
+            cookpad_urls = self.get_cookpad_urls_from_article(article_url)
+            self.cookpad_urls.update(cookpad_urls)
+            print(f"    -> {len(cookpad_urls)}件のCookpadリンクが見つかりました")
+        
+        print(f"\n合計Cookpadリンク数: {len(self.cookpad_urls)}")
+        
+        # 訪問済みのCookpadURLを除外
+        unvisited_cookpad_urls = self.cookpad_urls - self.visited_cookpad_urls
+        skipped_cookpad_count = len(self.cookpad_urls) - len(unvisited_cookpad_urls)
+        if skipped_cookpad_count > 0:
+            print(f"訪問済みCookpadリンク数（スキップ）: {skipped_cookpad_count}")
+        print(f"処理対象Cookpadリンク数: {len(unvisited_cookpad_urls)}")
+        
+        # Cookpadページをスクレイピング
+        print(f"\nCookpadページをスクレイピング中...")
+        for i, cookpad_url in enumerate(unvisited_cookpad_urls, 1):
+            print(f"  [{i}/{len(unvisited_cookpad_urls)}] {cookpad_url}")
+            result = self.scrape_cookpad_page(cookpad_url)
+            if result:
+                self.results.append(result)
+                tsukurepo = result.get('tsukurepo_count', 0)
+                print(f"    -> タイトル: {result.get('title', 'N/A')[:50]}")
+                print(f"    -> つくれぽ数: {tsukurepo}")
+                # INSERT文を生成してファイルに追記
+                self.append_insert_statement(result)
+        
+        return self.results
+    
     def scrape_all_categories(self, category_urls: List[str], max_pages: int = 10):
         """
         複数のカテゴリページを順番にスクレイピング
@@ -424,6 +542,36 @@ class CookAIScraper:
         
         return self.results
     
+    def scrape_all_tags(self, tag_urls: List[str], max_pages: int = 10):
+        """
+        複数のタグページを順番にスクレイピング
+        
+        Args:
+            tag_urls: タグページのURLリスト
+            max_pages: 各タグの最大ページ数（ページネーション）
+        """
+        print(f"\n{'='*80}")
+        print(f"複数タグのスクレイピングを開始")
+        print(f"処理対象タグ数: {len(tag_urls)}")
+        print(f"{'='*80}")
+        
+        for idx, tag_url in enumerate(tag_urls, 1):
+            print(f"\n{'#'*80}")
+            print(f"タグ {idx}/{len(tag_urls)}: {tag_url}")
+            print(f"{'#'*80}")
+            
+            # 1タグの処理を実行（記事ページ解析⇒Cookpadページスクレイピング）
+            self.scrape_tag(tag_url, max_pages=max_pages)
+            
+            print(f"\nタグ {idx}/{len(tag_urls)} の処理が完了しました")
+            print(f"現在の累計結果数: {len(self.results)}")
+        
+        print(f"\n{'='*80}")
+        print(f"全タグのスクレイピングが完了しました")
+        print(f"{'='*80}")
+        
+        return self.results
+    
     def save_results(self, output_file: str = 'cookpad_recipes.json'):
         """結果をJSONファイルに保存"""
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -433,49 +581,51 @@ class CookAIScraper:
 
 def main():
     """メイン処理"""
-    # デフォルトのカテゴリリスト
-    default_categories = [
-        "お肉の人気レシピ",
-        "お菓子の人気レシピ",
-        "ご飯の人気レシピ",
-        "果物の人気レシピ",
-        "野菜の人気レシピ",
-        "魚の人気レシピ",
-        "麺の人気レシピ"
-    ]
-    
-    # カテゴリ名をURLエンコードしてURLリストを作成（小文字に変換して既存のURL形式に合わせる）
-    base_url = "https://cookai-recipe.com/category/"
-    default_category_urls = [base_url + quote(cat, safe='').lower() for cat in default_categories]
-    
-    # コマンドライン引数からURLを取得（オプション）
-    # 引数が1つの場合は単一カテゴリ、複数の場合は複数カテゴリとして処理
-    if len(sys.argv) > 1:
-        if sys.argv[1] == '--all' or sys.argv[1] == '-a':
-            # 全カテゴリを処理
-            category_urls = default_category_urls
-        elif sys.argv[1].startswith('http'):
-            # URLが指定された場合は単一カテゴリとして処理
-            category_urls = [sys.argv[1]]
-        else:
-            # カテゴリ名が指定された場合
-            category_urls = [base_url + quote(sys.argv[1], safe='').lower()]
-    else:
-        # デフォルトで全カテゴリを処理
-        category_urls = default_category_urls
-    
     # 最大ページ数の指定（オプション）
     max_pages = 10
-    if len(sys.argv) > 2 and sys.argv[-1].isdigit():
+    if len(sys.argv) > 1 and sys.argv[-1].isdigit():
         max_pages = int(sys.argv[-1])
     
     scraper = CookAIScraper(delay=1.0)  # 1秒待機
     
-    # 複数カテゴリの場合は順番に処理
-    if len(category_urls) > 1:
-        results = scraper.scrape_all_categories(category_urls, max_pages=max_pages)
+    # トップページからカテゴリとタグのURLを取得
+    top_url = "https://cookai-recipe.com/"
+    print(f"\n{'='*80}")
+    print(f"トップページからカテゴリとタグを取得中: {top_url}")
+    print(f"{'='*80}")
+    
+    category_urls = list(scraper.get_category_urls(top_url))
+    print(f"\n取得したカテゴリ数: {len(category_urls)}")
+    
+    if category_urls:
+        print(f"\nカテゴリ一覧:")
+        for cat_url in category_urls:
+            print(f"  - {cat_url}")
+    
+    # タグを取得（カテゴリページからも取得を試みる）
+    tag_urls = list(scraper.get_tag_urls(top_url, set(category_urls)))
+    print(f"\n取得したタグ数: {len(tag_urls)}")
+    
+    if tag_urls:
+        print(f"\nタグ一覧:")
+        for tag_url in tag_urls:
+            print(f"  - {tag_url}")
     else:
-        results = scraper.scrape_category(category_urls[0], max_pages=max_pages)
+        print(f"\n警告: タグが見つかりませんでした。サイト構造を確認してください。")
+    
+    # カテゴリを順番にスクレイピング
+    if category_urls:
+        print(f"\n{'='*80}")
+        print(f"カテゴリのスクレイピングを開始")
+        print(f"{'='*80}")
+        scraper.scrape_all_categories(category_urls, max_pages=max_pages)
+    
+    # タグを順番にスクレイピング
+    if tag_urls:
+        print(f"\n{'='*80}")
+        print(f"タグのスクレイピングを開始")
+        print(f"{'='*80}")
+        scraper.scrape_all_tags(tag_urls, max_pages=max_pages)
     
     # 結果を保存
     scraper.save_results('cookpad_recipes.json')
@@ -488,11 +638,11 @@ def main():
     print(f"訪問した記事ページ数: {len(scraper.visited_article_urls)}")
     print(f"訪問したCookpadページ数: {len(scraper.visited_cookpad_urls)}")
     print(f"取得したCookpadリンク数: {len(scraper.cookpad_urls)}")
-    print(f"成功したスクレイピング数: {len(results)}")
+    print(f"成功したスクレイピング数: {len(scraper.results)}")
     
-    if results:
+    if scraper.results:
         print(f"\n最初の10件の結果:")
-        for i, result in enumerate(results[:10], 1):
+        for i, result in enumerate(scraper.results[:10], 1):
             print(f"\n{i}. {result.get('title', 'N/A')}")
             print(f"   画像: {result.get('image_url', 'N/A')}")
             print(f"   作者: {result.get('author', 'N/A')}")
