@@ -1,8 +1,11 @@
 # 環境
-apt-get update
-apt-get install -y python3 python3-pip
+apt update
+apt install -y python3 python3-pip
+apt install git
+git 設定
 pip install torch transformers accelerate peft bitsandbytes datasets
 pip install fastapi uvicorn
+huggingface-cli login
 
 # 実行
 uvicorn app:app --host 0.0.0.0 --port 8000 &
