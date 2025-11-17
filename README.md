@@ -10,6 +10,10 @@ huggingface-cli login
 # 実行
 uvicorn app:app --host 0.0.0.0 --port 8000 &
 
+最新バージョン（sysop版）
+uvicorn app_4th:app --host 0.0.0.0 --port 8000 &
+
+
 # スクリプト説明
 
 analyze_training_data.py    学習データが512byte以下かチェック
